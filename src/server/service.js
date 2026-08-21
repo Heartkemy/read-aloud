@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import fs, { createReadStream } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { segmentText } from '../segment.js'
 import { DEFAULT_VOICE, parseVoiceId } from '../voices.js'
 import { createKokoroEngine } from './engines/kokoro.js'
 import { createSayEngine } from './engines/say.js'
@@ -180,11 +181,47 @@ export function createReadAloudService({
     }
   }
 
-  /**
-   * Renders (or finds) the clip for one passage.
-   * Resolves `{ url, seconds, voice, cached }`.
-   */
-  async function synthesize({ text, intro, voice: requestedVoice }) {
+  /** Renders one already-normalized chunk of speech. Everything below goes
+   *  through here, so the cache key is computed in exactly one place. */
+  async function renderChunk({ spoken, voice, engine }) {
+    const key = createHash('sha256')
+      .update(`v${CACHE_VERSION}\n${voice.id}\n${spoken}`)
+      .digest('hex')
+      .slice(0, 20)
+    const file = path.join(cacheDir, `${key}.wav`)
+    const url = `${basePath}/clip/${key}.wav`
+
+    if (fs.existsSync(file)) {
+      // Touch it, so "recently listened to" counts as recent when evicting.
+      const now = new Date()
+      fs.utimesSync(file, now, now)
+      return { key, url, seconds: wavSeconds(file), voice: voice.id, cached: true }
+    }
+
+    const existing = inFlight.get(key)
+    if (existing) return existing
+
+    const job = engine
+      .render({ text: spoken, out: file, voice: voice.id })
+      .then((result) => {
+        if (!fs.existsSync(file)) throw new Error('Synthesis produced no audio.')
+        evictOldClips()
+        return {
+          key,
+          url,
+          seconds: result?.seconds ?? wavSeconds(file),
+          voice: voice.id,
+          cached: false,
+        }
+      })
+      .finally(() => inFlight.delete(key))
+
+    inFlight.set(key, job)
+    return job
+  }
+
+  /** Prepares a request: resolves the voice and engine, normalizes the text. */
+  async function prepare({ text, intro, voice: requestedVoice }) {
     const body = String(text ?? '').trim()
     if (!body) throw new Error('Nothing to speak.')
     if (body.length > maxTextLength) {
@@ -205,40 +242,77 @@ export function createReadAloudService({
       // "asterisk". Audible, so it does not pass silently.
       onLog(`markdown leaked into speech: ${leaks.join(' ')}`)
     }
+    return { spoken, voice, engine }
+  }
 
-    const key = createHash('sha256')
-      .update(`v${CACHE_VERSION}\n${voice.id}\n${spoken}`)
-      .digest('hex')
-      .slice(0, 20)
-    const file = path.join(cacheDir, `${key}.wav`)
-    const url = `${basePath}/clip/${key}.wav`
-
-    if (fs.existsSync(file)) {
-      // Touch it, so "recently listened to" counts as recent when evicting.
-      const now = new Date()
-      fs.utimesSync(file, now, now)
-      return { url, seconds: wavSeconds(file), voice: voice.id, cached: true }
+  /**
+   * Splits a passage into segments and renders **only the first** before
+   * answering; the rest are rendered in the background, in order, while the
+   * listener is hearing segment one.
+   *
+   * This is what makes a long passage start in under a second instead of after
+   * a twenty-second render. Every segment's URL is a content hash and is known
+   * before its audio exists, so the client can simply request the next one — and
+   * `serveClip` waits for an in-flight render rather than answering 404.
+   *
+   * Resolves `{ segments: [{ url, seconds }], voice, segmented: true }`, where
+   * `seconds` is real for the first segment and `null` for the others until
+   * they have been rendered.
+   */
+  async function synthesizeSegments(input) {
+    const { spoken, voice, engine } = await prepare(input)
+    const parts = segmentText(spoken, input.segmentation)
+    if (parts.length <= 1) {
+      const clip = await renderChunk({ spoken, voice, engine })
+      return {
+        segments: [{ url: clip.url, seconds: clip.seconds, chars: spoken.length }],
+        voice: voice.id,
+        segmented: false,
+      }
     }
 
-    const existing = inFlight.get(key)
-    if (existing) return existing
+    const first = await renderChunk({ spoken: parts[0], voice, engine })
 
-    const job = engine
-      .render({ text: spoken, out: file, voice: voice.id })
-      .then((result) => {
-        if (!fs.existsSync(file)) throw new Error('Synthesis produced no audio.')
-        evictOldClips()
-        return {
-          url,
-          seconds: result?.seconds ?? wavSeconds(file),
-          voice: voice.id,
-          cached: false,
-        }
-      })
-      .finally(() => inFlight.delete(key))
+    // The rest, in order, on the same serial engine queue. Deliberately not
+    // awaited — and deliberately not parallel: generation is GPU-bound, so
+    // asking for all of them at once makes the *second* one arrive later, which
+    // is the only one whose arrival time the listener can feel.
+    const rest = parts.slice(1)
+    void rest
+      .reduce(
+        (chain, part) => chain.then(() => renderChunk({ spoken: part, voice, engine }).catch(() => {})),
+        Promise.resolve(),
+      )
+      .catch(() => {})
 
-    inFlight.set(key, job)
-    return job
+    const keyFor = (part) =>
+      createHash('sha256').update(`v${CACHE_VERSION}\n${voice.id}\n${part}`).digest('hex').slice(0, 20)
+
+    return {
+      voice: voice.id,
+      segmented: true,
+      // `chars` travels with each pending segment so the player can show an
+      // honest *estimated* total length before those segments exist, and label
+      // it as an estimate. The real duration replaces it as each one loads.
+      segments: [
+        { url: first.url, seconds: first.seconds, chars: parts[0].length },
+        ...rest.map((part) => ({
+          url: `${basePath}/clip/${keyFor(part)}.wav`,
+          seconds: null,
+          chars: part.length,
+        })),
+      ],
+    }
+  }
+
+  /**
+   * Renders (or finds) the single clip for one passage.
+   * Resolves `{ url, seconds, voice, cached }`.
+   */
+  async function synthesize(input) {
+    const { spoken, voice, engine } = await prepare(input)
+    const clip = await renderChunk({ spoken, voice, engine })
+    return { url: clip.url, seconds: clip.seconds, voice: clip.voice, cached: clip.cached }
   }
 
   /** What the client needs before it can render a picker. */
@@ -273,10 +347,26 @@ export function createReadAloudService({
     }
   }
 
-  function serveClip(res, name, range) {
+  /**
+   * Waits for a clip that is still being rendered.
+   *
+   * Segment two of a long passage is requested by the player while it is still
+   * on the engine's queue, and answering 404 for "not finished yet" would make
+   * the whole streaming design impossible — the URL is a content hash, so it is
+   * known long before the audio exists. A request for a clip nobody is rendering
+   * still 404s immediately; this only ever waits for work already in progress.
+   */
+  async function awaitClip(name) {
+    const key = name.replace(/\.wav$/, '')
+    const pending = inFlight.get(key)
+    if (pending) await pending.catch(() => {})
+  }
+
+  async function serveClip(res, name, range) {
     // Path-traversal defence: the name has to look exactly like a key we made.
     if (!/^[a-f0-9]{20}\.wav$/.test(name)) return sendJson(res, 404, { error: 'No such clip.' })
     const file = path.join(cacheDir, name)
+    if (!fs.existsSync(file)) await awaitClip(name)
     if (!fs.existsSync(file)) return sendJson(res, 404, { error: 'That clip has expired.' })
 
     const size = fs.statSync(file).size
@@ -325,7 +415,7 @@ export function createReadAloudService({
 
     const clip = /^\/clip\/(.+)$/.exec(pathname)
     if (clip && req.method === 'GET') {
-      return serveClip(res, decodeURIComponent(clip[1]), req.headers?.range)
+      return await serveClip(res, decodeURIComponent(clip[1]), req.headers?.range)
     }
 
     if (pathname !== '/' && pathname !== '') {
@@ -342,8 +432,13 @@ export function createReadAloudService({
 
     try {
       const raw = await readBody(req, maxTextLength * 4)
-      const clipResult = await synthesize(JSON.parse(raw || '{}'))
-      return sendJson(res, 200, clipResult)
+      const payload = JSON.parse(raw || '{}')
+      // `segment: true` means "start playing as soon as you can": the first
+      // segment is rendered before answering, the rest while it plays.
+      const result = payload.segment
+        ? await synthesizeSegments(payload)
+        : await synthesize(payload)
+      return sendJson(res, 200, result)
     } catch (err) {
       return sendJson(res, 500, { error: err.message || 'Speech synthesis failed.' })
     }
@@ -359,6 +454,8 @@ export function createReadAloudService({
     cacheDir,
     info,
     synthesize,
+    synthesizeSegments,
+    awaitClip,
     warm,
     handleRequest,
     shutdown,

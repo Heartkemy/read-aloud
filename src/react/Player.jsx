@@ -141,7 +141,7 @@ export function ReadAloudPlayer({
 
   if (!speech || !speech.passage) return null
 
-  const { status, time, duration, error, skipSeconds, rate, voice } = speech
+  const { status, time, duration, error, skipSeconds, rate, voice, estimated } = speech
   const preparing = status === 'preparing'
   const playing = status === 'playing'
   const progress = duration > 0 ? Math.min(1, time / duration) : 0
@@ -229,9 +229,16 @@ export function ReadAloudPlayer({
               where a music player puts them. Reading "0:18 / 0:25" as one
               string is a stopwatch; split to the ends of the bar they belong
               to, they are just the two ends of the bar. */}
+          {/* The total carries a `~` while any segment is still being rendered
+              and its length is an estimate. Showing an estimate as if it were
+              measured is the kind of small lie a player has no reason to tell —
+              and it resolves to the real number as the segments arrive. */}
           <div className="ra-player__times" aria-hidden="true">
             <span>{formatTime(time)}</span>
-            <span>{formatTime(duration)}</span>
+            <span title={estimated ? 'Estimated — still being generated' : undefined}>
+              {estimated ? '~' : ''}
+              {formatTime(duration)}
+            </span>
           </div>
 
           {/* Transport centred, play at its centre and twice the size of

@@ -50,9 +50,14 @@ export interface ReadAloudState {
   activeId: string | null
   status: PlaybackStatus
   error: string | null
-  /** Seconds elapsed and total, both real — never estimated. */
+  /** Elapsed and total seconds across the whole passage, not the current
+   *  segment's own clock. */
   time: number
   duration: number
+  /** True while any segment is still rendering and its length is an estimate. */
+  estimated: boolean
+  segments: Array<{ url: string; seconds: number | null; chars: number | null }>
+  segmentIndex: number
   voice: string
   rate: number
   rates: number[]

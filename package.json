@@ -29,12 +29,31 @@
       "default": "./dist/react.js"
     },
     "./style.css": "./src/style.css",
-    "./voices": "./src/voices.js",
-    "./text": "./src/text.js",
-    "./server": "./src/server/index.js",
-    "./vite": "./src/server/vite.js",
-    "./express": "./src/server/express.js",
-    "./package.json": "./package.json"
+    "./voices": {
+      "types": "./types/index.d.ts",
+      "default": "./src/voices.js"
+    },
+    "./text": {
+      "types": "./types/index.d.ts",
+      "default": "./src/text.js"
+    },
+    "./server": {
+      "types": "./types/server.d.ts",
+      "default": "./src/server/index.js"
+    },
+    "./vite": {
+      "types": "./types/server.d.ts",
+      "default": "./src/server/vite.js"
+    },
+    "./express": {
+      "types": "./types/server.d.ts",
+      "default": "./src/server/express.js"
+    },
+    "./package.json": "./package.json",
+    "./fetch": {
+      "types": "./types/server.d.ts",
+      "default": "./src/server/fetch.js"
+    }
   },
   "files": [
     "dist",

@@ -35,6 +35,35 @@ const SILENCE =
 /** Playback speeds offered by the player, in the order the button cycles them. */
 export const DEFAULT_RATES = [1, 1.25, 1.5, 2]
 
+/** Fallback speaking pace, in characters per second, for a segment that has not
+ *  been rendered yet. Only used until the first segment reports a real duration,
+ *  after which the passage's own measured pace replaces it — different voices
+ *  and different languages are not the same speed, and a guess that adapts is
+ *  better than a constant that cannot. */
+const FALLBACK_CHARS_PER_SECOND = 17
+
+/** Seconds per segment: real where known, estimated from character count where
+ *  the audio does not exist yet. */
+function segmentSeconds(segment, charsPerSecond) {
+  if (typeof segment.seconds === 'number') return segment.seconds
+  if (!segment.chars) return 0
+  return segment.chars / charsPerSecond
+}
+
+/** The passage's measured pace, taken from whichever segments have real
+ *  durations. This is what keeps the estimated total honest as it plays. */
+function measurePace(segments) {
+  let chars = 0
+  let seconds = 0
+  for (const segment of segments) {
+    if (typeof segment.seconds === 'number' && segment.chars) {
+      chars += segment.chars
+      seconds += segment.seconds
+    }
+  }
+  return seconds > 0 ? chars / seconds : FALLBACK_CHARS_PER_SECOND
+}
+
 function readStored(key, fallback) {
   if (typeof window === 'undefined') return fallback
   try {
@@ -80,6 +109,18 @@ export function ReadAloudProvider({
   const requestRef = useRef(0)
   const resumeAtRef = useRef(0)
   const dismissTimerRef = useRef(null)
+  /* The segment queue.
+     ---------------------------------------------------------------------------
+     A long passage is rendered in pieces so playback can start on the first one
+     while the rest are still being generated (see `segmentText` on the server).
+     The player presents them as one continuous passage: `segments` holds
+     `{ url, seconds, chars }` per piece, `segmentIndex` is the one playing, and
+     everything the UI shows — elapsed, total, seek position — is computed
+     across the whole list rather than the current file. */
+  const segmentsRef = useRef([])
+  const indexRef = useRef(0)
+  const [segments, setSegments] = useState([])
+  const [segmentIndex, setSegmentIndex] = useState(0)
 
   const [service, setService] = useState({ available: null, voices: [], defaultVoice: initialVoice })
   const [passage, setPassage] = useState(null)
@@ -137,9 +178,34 @@ export function ReadAloudProvider({
     audio.preload = 'metadata'
     audioRef.current = audio
 
-    const onTime = () => setTime(audio.currentTime)
+    /* Events from the unlock clip are not events about a passage.
+       -------------------------------------------------------------------------
+       The element plays 10ms of silence inside the click to unlock itself, and
+       that clip fires `play`, `timeupdate` and — the damaging one — `ended`. On
+       a cold model load the fetch is still in flight when `ended` arrives, so
+       the status went from 'preparing' to 'ended' and the auto-dismiss timer
+       started counting down on a passage that had not begun. Four and a half
+       seconds later the player cleared itself, and the audio arrived to a
+       widget that no longer existed. The flag is cleared the moment the real
+       clip's src is set. */
+    const isUnlockClip = () => audio.dataset.unlockOnly === 'yes'
+
+    const onTime = () => {
+      if (isUnlockClip()) return
+      setTime(audio.currentTime)
+    }
     const onMeta = () => {
-      if (Number.isFinite(audio.duration)) setDuration(audio.duration)
+      if (isUnlockClip()) return
+      // Every segment that loads turns one estimate into a fact.
+      if (Number.isFinite(audio.duration)) {
+        const list = segmentsRef.current
+        const current = list[indexRef.current]
+        if (current && current.seconds !== audio.duration) {
+          current.seconds = audio.duration
+          segmentsRef.current = [...list]
+          setSegments(segmentsRef.current)
+        }
+      }
       // Restored position after a voice change: the listener was 40 seconds
       // into a passage and should not be sent back to the start by it.
       if (resumeAtRef.current > 0) {
@@ -147,13 +213,32 @@ export function ReadAloudProvider({
         resumeAtRef.current = 0
       }
     }
-    const onPlay = () => setStatus('playing')
-    const onPause = () => setStatus((s) => (s === 'playing' ? 'paused' : s))
+    const onPlay = () => {
+      if (isUnlockClip()) return
+      setStatus('playing')
+    }
+    const onPause = () => {
+      if (isUnlockClip()) return
+      setStatus((s) => (s === 'playing' ? 'paused' : s))
+    }
     const onEnded = () => {
+      if (isUnlockClip()) return
+      // The end of a segment is not the end of the passage. Advance, and let
+      // the next file load and play with no gap the listener has to act on.
+      const next = indexRef.current + 1
+      if (next < segmentsRef.current.length) {
+        indexRef.current = next
+        setSegmentIndex(next)
+        audio.src = segmentsRef.current[next].url
+        audio.playbackRate = audio.playbackRate || 1
+        void audio.play().catch(() => setStatus('paused'))
+        return
+      }
       setStatus('ended')
       setTime(0)
     }
     const onError = () => {
+      if (isUnlockClip()) return
       setStatus('error')
       setError('That audio could not be played.')
     }
@@ -194,7 +279,8 @@ export function ReadAloudProvider({
     return () => clearTimeout(dismissTimerRef.current)
   }, [status, dismissAfterMs])
 
-  /** Fetches (or picks up the cached) clip and starts it. */
+  /** Fetches the passage — as segments when it is long enough to be worth it —
+   *  and starts the first one. */
   const load = useCallback(
     async (next, { voice: voiceOverride, resumeAt = 0 } = {}) => {
       const audio = audioRef.current
@@ -207,6 +293,10 @@ export function ReadAloudProvider({
       setError(null)
       setTime(resumeAt)
       setDuration(0)
+      segmentsRef.current = []
+      indexRef.current = 0
+      setSegments([])
+      setSegmentIndex(0)
 
       try {
         const res = await fetch(endpoint, {
@@ -216,6 +306,9 @@ export function ReadAloudProvider({
             text: next.text,
             intro: next.intro,
             voice: voiceOverride ?? voice,
+            // Ask the server to start rendering in pieces. Short passages come
+            // back as a single segment anyway, so this costs nothing there.
+            segment: true,
           }),
         })
         const data = await res.json().catch(() => ({}))
@@ -223,8 +316,15 @@ export function ReadAloudProvider({
         // A newer request has been made since; this one's result is stale.
         if (token !== requestRef.current) return
 
-        setDuration(data.seconds ?? 0)
-        audio.src = data.url
+        const list = data.segments ?? [{ url: data.url, seconds: data.seconds, chars: null }]
+        segmentsRef.current = list.map((segment) => ({ ...segment }))
+        indexRef.current = 0
+        setSegments(segmentsRef.current)
+        setSegmentIndex(0)
+
+        // From here on, every event from this element is about the passage.
+        delete audio.dataset.unlockOnly
+        audio.src = list[0].url
         audio.playbackRate = rate
         await audio.play()
       } catch (err) {
@@ -262,6 +362,7 @@ export function ReadAloudProvider({
       // unlocked for the programmatic play() that follows the fetch.
       if (audio && !audio.dataset.unlocked) {
         audio.dataset.unlocked = 'yes'
+        audio.dataset.unlockOnly = 'yes'
         audio.src = SILENCE
         void audio.play().catch(() => {})
       }
@@ -316,13 +417,63 @@ export function ReadAloudProvider({
     setDuration(0)
   }, [])
 
-  const seek = useCallback((seconds) => {
-    const audio = audioRef.current
-    if (!audio || !Number.isFinite(audio.duration)) return
-    const clamped = Math.min(audio.duration, Math.max(0, seconds))
-    audio.currentTime = clamped
-    setTime(clamped)
-  }, [])
+  /* The passage's timeline, across every segment.
+     ---------------------------------------------------------------------------
+     `elapsed` and `total` are what the player shows, and neither is the current
+     audio file's own numbers: a listener 40 seconds into a briefing does not
+     care that they are 4 seconds into its third clip. Segments that have not
+     been rendered yet contribute an estimate, and `estimated` says so, so the
+     total can be labelled rather than quietly wrong. */
+  const pace = useMemo(() => measurePace(segments), [segments])
+  const total = useMemo(
+    () => segments.reduce((sum, segment) => sum + segmentSeconds(segment, pace), 0),
+    [segments, pace],
+  )
+  const elapsedBefore = useMemo(
+    () =>
+      segments
+        .slice(0, segmentIndex)
+        .reduce((sum, segment) => sum + segmentSeconds(segment, pace), 0),
+    [segments, segmentIndex, pace],
+  )
+  const estimated = segments.some((segment) => typeof segment.seconds !== 'number')
+
+  /** Seeks across the whole passage, switching segment if the target is in a
+   *  different one. */
+  const seek = useCallback(
+    (seconds) => {
+      const audio = audioRef.current
+      const list = segmentsRef.current
+      if (!audio || list.length === 0) return
+      const paceNow = measurePace(list)
+      const target = Math.max(0, Math.min(seconds, list.reduce((sum, s2) => sum + segmentSeconds(s2, paceNow), 0)))
+
+      let index = 0
+      let offset = target
+      while (index < list.length - 1 && offset > segmentSeconds(list[index], paceNow)) {
+        offset -= segmentSeconds(list[index], paceNow)
+        index += 1
+      }
+
+      if (index === indexRef.current) {
+        if (!Number.isFinite(audio.duration)) return
+        audio.currentTime = Math.min(offset, audio.duration)
+        setTime(audio.currentTime)
+        return
+      }
+
+      // A different segment: swap the source and land at the offset once its
+      // metadata arrives (the same path a voice change uses).
+      const wasPlaying = !audio.paused
+      indexRef.current = index
+      setSegmentIndex(index)
+      resumeAtRef.current = offset
+      audio.src = list[index].url
+      audio.playbackRate = rate
+      if (wasPlaying) void audio.play().catch(() => setStatus('paused'))
+    },
+    [rate],
+  )
 
   const skip = useCallback((delta) => seek((audioRef.current?.currentTime ?? 0) + delta), [seek])
 
@@ -366,8 +517,13 @@ export function ReadAloudProvider({
       activeId: passage?.id ?? null,
       status,
       error,
-      time,
-      duration,
+      // Virtual, across the whole passage — not the current clip's own clock.
+      time: elapsedBefore + time,
+      duration: total || duration,
+      /** True while any segment's length is still an estimate. */
+      estimated,
+      segments,
+      segmentIndex,
       voice,
       rate,
       rates,
@@ -391,6 +547,11 @@ export function ReadAloudProvider({
       error,
       time,
       duration,
+      elapsedBefore,
+      total,
+      estimated,
+      segments,
+      segmentIndex,
       voice,
       rate,
       rates,

@@ -39,6 +39,9 @@ eight seconds and nobody clicks twice. So:
 
 - the model is **loaded once and kept warm** in a stdin/stdout worker (7.6 s
   cold, **0.57 s** warm for a four-second passage on an M-series Mac),
+- a long passage is **cut into segments and starts playing on the first one**
+  while the rest render behind it — 1.5 s to first audio on a 47-second passage
+  instead of waiting for the whole thing,
 - audio is **content-addressed** — same text, same voice, same normalizer output
   means the same file, so a second listen costs a static read,
 - clips are served with **HTTP Range** support, so the scrubber seeks instead of
@@ -172,6 +175,29 @@ sentence in every voice and measure: speaking rate, pitch variation in semitones
 and loudness variation. `scripts/rank-voices.mjs` does exactly that and prints a
 ranked table — a defensible starting point, and your ears get the final say via
 the picker.
+
+## Starting before it has finished rendering
+
+Rendering a five-minute briefing takes ~20 seconds even at 15× real time, and
+nobody waits 20 seconds after pressing play. True streaming is not available —
+MediaSource cannot take WAV — so the library does the thing that works instead:
+
+1. the passage is cut into segments at **sentence boundaries** (never mid-clause,
+   because a cut mid-sentence is audible on both sides), with a deliberately
+   short first segment;
+2. the first segment is rendered and returned, and playback starts;
+3. the rest render in the background, **in order, serially** — generation is
+   GPU-bound, so rendering them all at once makes segment two arrive later,
+   which is the only arrival time a listener can feel;
+4. every segment's URL is a content hash, so the client knows all of them before
+   the audio exists and simply requests the next one. A request for a clip that
+   is still rendering **waits for it** rather than 404ing.
+
+The player presents this as one passage: elapsed and total are computed across
+the whole list, seeking crosses segment boundaries, and a total that still
+contains an estimate is shown with a `~` until the real durations arrive.
+Segments that have been rendered are cached individually, so a second listen
+starts instantly and a partially-heard passage costs nothing to resume.
 
 ## Architecture
 
