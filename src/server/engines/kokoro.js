@@ -194,6 +194,22 @@ export function createSynthesizer({
     })
   }
 
+  /**
+   * Restarts the idle countdown on a model that is already loaded.
+   *
+   * The countdown otherwise runs from the last *render*, which is the wrong
+   * event: a long passage renders all its segments in the first few seconds and
+   * is then listened to for ten minutes, so the model can unload while someone
+   * is still listening to it — and the next button they press pays a cold load.
+   * Playback is the thing that says "this person is still here", so the client
+   * touches this when a passage ends. Never starts the model: a page nobody is
+   * using should not keep 1.5GB resident by pinging.
+   */
+  function touch() {
+    if (child) touchIdleTimer()
+    return Boolean(child)
+  }
+
   function stop() {
     if (idleTimer) clearTimeout(idleTimer)
     idleTimer = null
@@ -215,6 +231,7 @@ export function createSynthesizer({
     /** Loads the model without rendering anything. Turns the first click from a
      *  cold load into a warm render. */
     warmUp: start,
+    touch,
     render,
     stop,
     /** True once the model is loaded and a request would be answered immediately. */
@@ -239,6 +256,7 @@ export function createKokoroEngine({ languages = ['en'], ...options } = {}) {
     available: synth.available,
     unavailableReason: synth.unavailableReason,
     warmUp: synth.warmUp,
+    touch: synth.touch,
     voices: () => voicesForLanguages(languages),
     render: ({ text, out, voice, speed }) =>
       synth.render({ text, out, voice: parseVoiceId(voice).nativeId, speed }),

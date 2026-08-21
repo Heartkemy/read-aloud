@@ -81,6 +81,8 @@ export function createReadAloudFetchHandler(options = {}) {
       ? url.pathname.slice(service.basePath.length) || '/'
       : url.pathname
 
+    if (pathname === '/warm') return json(service.keepWarm())
+
     const clip = /^\/clip\/(.+)$/.exec(pathname)
     if (clip) {
       if (request.method !== 'GET') return json({ error: 'GET only.' }, 405)

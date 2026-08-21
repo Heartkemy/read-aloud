@@ -357,6 +357,20 @@ export function createReadAloudService({
     }
   }
 
+  /**
+   * "Still listening" — restarts the idle countdown on an already-loaded model.
+   *
+   * The client sends this when a passage finishes playing, which is the moment
+   * that actually means someone is here and may press another button. Rendering
+   * is a bad proxy for it: a long passage renders everything up front and is
+   * then listened to for minutes.
+   */
+  function keepWarm() {
+    let warm = false
+    for (const engine of activeEngines()) warm = Boolean(engine.touch?.()) || warm
+    return { warm }
+  }
+
   /** Rendered ahead of a likely play. Never throws — audio is a nicety, and the
    *  caller (page generation, usually) must not fail because a model didn't. */
   async function warm(passages) {
@@ -435,6 +449,12 @@ export function createReadAloudService({
       ? url.pathname.slice(basePath.length) || '/'
       : url.pathname
 
+    if (pathname === '/warm') {
+      // Deliberately answers the same whether a model is loaded or not: the
+      // client is reporting activity, not asking for anything.
+      return sendJson(res, 200, keepWarm())
+    }
+
     const clip = /^\/clip\/(.+)$/.exec(pathname)
     if (clip && req.method === 'GET') {
       return await serveClip(res, decodeURIComponent(clip[1]), req.headers?.range)
@@ -475,6 +495,7 @@ export function createReadAloudService({
     basePath,
     cacheDir,
     info,
+    keepWarm,
     synthesize,
     synthesizeSegments,
     awaitClip,

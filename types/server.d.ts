@@ -68,8 +68,12 @@ export interface ReadAloudOptions {
   maxCachedClips?: number
   /** Hard limit on one passage, in characters. Default 20000. */
   maxTextLength?: number
-  /** How long the neural model stays warm before being released. Default 10 min. */
+  /** How long the neural model stays warm before being released, measured from
+   *  the last render or the last `keepWarm()`. Default 10 min. */
   idleTimeoutMs?: number
+  /** Start loading the model when a page asks for the voice list, rather than
+   *  on the first click. Default true. */
+  warmOnLoad?: boolean
   /** Python with mlx-audio installed. Default `$READ_ALOUD_PYTHON`, then the shared venv. */
   pythonPath?: string
   scriptPath?: string
@@ -83,6 +87,9 @@ export interface ReadAloudService {
   basePath: string
   cacheDir: string
   info(): Promise<ServiceInfo>
+  /** "Still listening" — restarts the idle countdown on an already-loaded
+   *  model. Never starts one. The client sends this when a passage ends. */
+  keepWarm(): { warm: boolean }
   synthesize(input: SynthesizeInput): Promise<SpeechClip>
   /** Best-effort pre-render for text a user is likely to press play on. Never throws. */
   warm(passages: string | SynthesizeInput | Array<string | SynthesizeInput>): Promise<void>

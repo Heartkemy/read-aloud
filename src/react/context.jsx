@@ -268,6 +268,16 @@ export function ReadAloudProvider({
     if (audioRef.current) audioRef.current.playbackRate = rate
   }, [rate, passage])
 
+  /* Finishing a passage is the clearest signal that someone is still here and
+     may press another button, so it is what keeps the model resident — the
+     server's own idle countdown otherwise runs from the last render, which for
+     a long passage happens minutes before the listening does. Fire and forget;
+     nothing depends on the answer. */
+  useEffect(() => {
+    if (status !== 'ended') return
+    fetch(`${endpoint}/warm`).catch(() => {})
+  }, [status, endpoint])
+
   /* Clear the player a few seconds after the passage ends — but only from
      'ended', so a deliberate pause halfway through never has a countdown
      running under it. Any new status cancels the timer, which covers pressing

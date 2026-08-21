@@ -38,7 +38,11 @@ putting a button on every passage is not, because a cold model load per click is
 eight seconds and nobody clicks twice. So:
 
 - the model is **loaded once and kept warm** in a stdin/stdout worker (7.6 s
-  cold, **0.57 s** warm for a four-second passage on an M-series Mac),
+  cold, **0.57 s** warm for a four-second passage on an M-series Mac). It starts
+  loading when a page containing read-aloud opens — not on the first click,
+  where the load *is* the first impression — and its idle countdown is restarted
+  by playback finishing rather than by rendering, because a long passage renders
+  everything in the first few seconds and is then listened to for minutes,
 - a long passage is **cut into segments and starts playing on the first one**
   while the rest render behind it — 1.5 s to first audio on a 47-second passage
   instead of waiting for the whole thing,
