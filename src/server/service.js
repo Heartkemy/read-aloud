@@ -117,6 +117,9 @@ export function createReadAloudService({
   scriptPath,
   model,
   engines,
+  /** Start loading the model as soon as a page asks for the voice list, rather
+   *  than on the first click. See `info()`. */
+  warmOnLoad = true,
   onLog = () => {},
 } = {}) {
   const allEngines =
@@ -132,6 +135,7 @@ export function createReadAloudService({
   // writing the same file, which is both wasteful and a torn-file hazard.
   const inFlight = new Map()
   let voiceIndex = null
+  let warmedUp = false
 
   fs.mkdirSync(cacheDir, { recursive: true })
 
@@ -315,8 +319,26 @@ export function createReadAloudService({
     return { url: clip.url, seconds: clip.seconds, voice: clip.voice, cached: clip.cached }
   }
 
-  /** What the client needs before it can render a picker. */
+  /**
+   * What the client needs before it can render a picker — and the moment the
+   * model starts loading.
+   *
+   * A cold Kokoro load is ~7.5 seconds and a warm render is under one. Left
+   * until the first click, that load *is* the feature's first impression: a
+   * button that appears to do nothing for seven seconds. This call happens once
+   * per page that has read-aloud in it, which is a far better signal than
+   * server start (where it would cost 1.5GB on every dev server, used or not)
+   * and than the first click (where it is too late). Fire and forget: nothing
+   * waits on it, and the idle timeout releases the model again if nobody plays
+   * anything.
+   */
   async function info() {
+    if (warmOnLoad && !warmedUp) {
+      warmedUp = true
+      for (const engine of activeEngines()) {
+        Promise.resolve(engine.warmUp?.()).catch((err) => onLog(`warm-up failed: ${err.message}`))
+      }
+    }
     const catalogue = await voiceCatalogue()
     const voices = [...catalogue.values()]
     const chosen = await resolveVoice(defaultVoice)

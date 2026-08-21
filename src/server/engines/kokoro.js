@@ -212,6 +212,9 @@ export function createSynthesizer({
     unavailableReason,
     pythonPath: python,
     scriptPath,
+    /** Loads the model without rendering anything. Turns the first click from a
+     *  cold load into a warm render. */
+    warmUp: start,
     render,
     stop,
     /** True once the model is loaded and a request would be answered immediately. */
@@ -235,6 +238,7 @@ export function createKokoroEngine({ languages = ['en'], ...options } = {}) {
     label: 'Kokoro (neural, local)',
     available: synth.available,
     unavailableReason: synth.unavailableReason,
+    warmUp: synth.warmUp,
     voices: () => voicesForLanguages(languages),
     render: ({ text, out, voice, speed }) =>
       synth.render({ text, out, voice: parseVoiceId(voice).nativeId, speed }),
