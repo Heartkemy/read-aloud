@@ -1,0 +1,76 @@
+{
+  "name": "@athanor-code/read-aloud",
+  "version": "0.1.0",
+  "description": "Local, private read-aloud for React apps: a speaker button on every passage, one shared player, and a neural voice that never leaves the machine.",
+  "keywords": [
+    "text-to-speech",
+    "tts",
+    "read-aloud",
+    "accessibility",
+    "react",
+    "kokoro",
+    "mlx",
+    "local-first",
+    "offline",
+    "vite",
+    "express"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/athanor-code/read-aloud.git"
+  },
+  "homepage": "https://github.com/athanor-code/read-aloud#readme",
+  "bugs": "https://github.com/athanor-code/read-aloud/issues",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./style.css": "./src/style.css",
+    "./voices": "./src/voices.js",
+    "./text": "./src/text.js",
+    "./server": "./src/server/index.js",
+    "./vite": "./src/server/vite.js",
+    "./express": "./src/server/express.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "python",
+    "scripts",
+    "types",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "read-aloud-setup": "./scripts/setup.mjs"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepare": "node scripts/build.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:python": "python3 python/test_normalize.py",
+    "rank-voices": "node scripts/rank-voices.mjs"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "react": "^18.3.1",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
