@@ -100,6 +100,24 @@ export function SkipIcon({ seconds = 10, back = false, size = 16, ...rest }) {
   )
 }
 
+/**
+ * Play-all: stacked lines with a play triangle.
+ *
+ * A list where every item has a speaker needs one more control — "read me all
+ * of these" — and it cannot be a second identical speaker icon, or the two are
+ * indistinguishable and the list looks like it has a stray button. Lines plus a
+ * triangle is the queue/playlist convention, and it says "several things, in
+ * order" without a label.
+ */
+export function PlayAllIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M4 6h10M4 12h7M4 18h5" />
+      <path d="M15 12.5v7l6-3.5z" fill="currentColor" strokeWidth="1.5" />
+    </Icon>
+  )
+}
+
 /** The chevron on the voice picker. Drawn by us because a native `<select>`
  *  arrow cannot be positioned, sized or coloured, and on a pill-shaped control
  *  it sits hard against the rounded edge. */

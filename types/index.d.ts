@@ -99,6 +99,9 @@ export interface ReadAloudProps {
   size?: number
   className?: string
   intro?: string
+  /** `list` draws the play-all glyph — for the control that reads a whole list
+   *  whose items each have their own button. */
+  variant?: 'passage' | 'list'
 }
 
 export function ReadAloud(props: ReadAloudProps): JSX.Element | null

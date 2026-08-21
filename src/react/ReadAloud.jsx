@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { passageText, passageId } from '../text.js'
 import { useReadAloud } from './context.jsx'
-import { LoadingDots, PauseIcon, SpeakerIcon } from './icons.jsx'
+import { LoadingDots, PauseIcon, PlayAllIcon, SpeakerIcon } from './icons.jsx'
 
 /**
  * The speaker button that sits next to a passage.
@@ -25,6 +25,10 @@ import { LoadingDots, PauseIcon, SpeakerIcon } from './icons.jsx'
  * @param {number}   [props.size]    Icon size in px.
  * @param {string}   [props.className] Merged with the library's own classes.
  * @param {string}   [props.intro]   Spoken-only lead-in, not shown anywhere.
+ * @param {'passage'|'list'} [props.variant] `list` draws the play-all glyph
+ *   instead of a speaker. Use it for the control that reads a whole list whose
+ *   items each have their own button — two identical speakers side by side is
+ *   the fastest way to make a list look broken.
  */
 export function ReadAloud({
   text,
@@ -34,6 +38,7 @@ export function ReadAloud({
   size = 15,
   className = '',
   intro,
+  variant = 'passage',
   ...rest
 }) {
   const speech = useReadAloud()
@@ -53,6 +58,7 @@ export function ReadAloud({
       onClick={() => speech.speak({ id: key, text: body, title, intro })}
       className={`ra-button ${className}`.trim()}
       data-state={state}
+      data-variant={variant}
       aria-label={speaking ? `Pause ${title ?? 'reading'}` : label}
       title={speaking ? 'Pause' : label}
       {...rest}
@@ -61,6 +67,8 @@ export function ReadAloud({
         <LoadingDots size={size} />
       ) : speaking ? (
         <PauseIcon size={size} />
+      ) : variant === 'list' ? (
+        <PlayAllIcon size={size} />
       ) : (
         <SpeakerIcon size={size} />
       )}

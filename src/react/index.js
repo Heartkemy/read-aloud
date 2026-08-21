@@ -10,7 +10,7 @@
 export { ReadAloudProvider, useReadAloud, DEFAULT_RATES } from './context.jsx'
 export { ReadAloud } from './ReadAloud.jsx'
 export { ReadAloudPlayer } from './Player.jsx'
-export { SpeakerIcon, PlayIcon, PauseIcon, StopIcon, SkipIcon, CloseIcon, LoadingDots } from './icons.jsx'
+export { SpeakerIcon, PlayIcon, PauseIcon, StopIcon, SkipIcon, CloseIcon, ChevronIcon, PlayAllIcon, LoadingDots } from './icons.jsx'
 export { passageText, passageId, speakDigits, estimateSeconds, formatTime } from '../text.js'
 export {
   VOICES,

@@ -119,6 +119,23 @@ import '@athanor-code/read-aloud/style.css'
 
 ### 3. Put buttons where the prose is
 
+Lists want both modes — play one, or play the lot. The play-all control gets its
+own glyph (stacked lines and a triangle), because two identical speaker icons
+side by side make a list look like it has a stray button in it:
+
+```jsx
+<h3>
+  Facilitators
+  <ReadAloud variant="list" text={people.flatMap((p) => [p.name, p.bio])} title="Facilitators" />
+</h3>
+{people.map((p) => (
+  <p key={p.name}>
+    {p.bio} <ReadAloud text={[p.name, p.bio]} title={p.name} />
+  </p>
+))}
+```
+
+
 ```jsx
 <ReadAloud text={message.text} title={`${sender}'s message`} />
 
@@ -135,7 +152,7 @@ import '@athanor-code/read-aloud/style.css'
 | Export | What it is |
 | --- | --- |
 | `ReadAloudProvider` | Owns the single `Audio` element, the settings, and the fetch. |
-| `ReadAloud` | The 24×24 speaker button. Renders `null` if no engine is available. |
+| `ReadAloud` | The 24×24 speaker button. Renders `null` if no engine is available. `variant="list"` draws a play-all glyph instead. |
 | `ReadAloudPlayer` | Transport: play/pause, ±10 s, scrubber, time, speed, voice, close. |
 | `useReadAloud()` | Everything above as state and callbacks, for custom UI. |
 | `passageText`, `speakDigits` | Text helpers — array-to-paragraphs, and phone numbers spelled digit by digit so they can be written down. |
