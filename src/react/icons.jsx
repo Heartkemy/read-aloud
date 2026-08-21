@@ -76,7 +76,12 @@ export function CloseIcon(props) {
 export function SkipIcon({ seconds = 10, back = false, size = 16, ...rest }) {
   return (
     <Icon size={size} {...rest}>
-      <g transform={back ? 'scale(-1,1) translate(-24,0)' : undefined}>
+      {/* The arc is drawn pointing forwards; the *back* variant is the one that
+          gets mirrored. Written the other way round first, which put a
+          clockwise arrow on "back 10 seconds" and an anticlockwise one on
+          "forward" — both wrong, and wrong in the way that is hardest to
+          notice, because each looked right on its own. */}
+      <g transform={back ? undefined : 'scale(-1,1) translate(-24,0)'}>
         <path d="M4 12a8 8 0 1 0 2.6-5.9" />
         <path d="M4 3.5V8h4.5" />
       </g>
@@ -91,6 +96,17 @@ export function SkipIcon({ seconds = 10, back = false, size = 16, ...rest }) {
       >
         {seconds}
       </text>
+    </Icon>
+  )
+}
+
+/** The chevron on the voice picker. Drawn by us because a native `<select>`
+ *  arrow cannot be positioned, sized or coloured, and on a pill-shaped control
+ *  it sits hard against the rounded edge. */
+export function ChevronIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="m6 9 6 6 6-6" />
     </Icon>
   )
 }

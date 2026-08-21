@@ -53,7 +53,7 @@
     "prepare": "node scripts/build.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:python": "python3 python/test_normalize.py",
+    "test:python": "${READ_ALOUD_PYTHON:-$HOME/.cache/read-aloud/venv/bin/python} -m pytest python/test_normalize.py -q",
     "rank-voices": "node scripts/rank-voices.mjs"
   },
   "peerDependencies": {

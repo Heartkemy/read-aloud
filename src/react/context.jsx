@@ -18,6 +18,20 @@ import { passageText, passageId } from '../text.js'
 
 const ReadAloudContext = createContext(null)
 
+/* Ten milliseconds of silence.
+   ---------------------------------------------------------------------------
+   Browsers only let an <audio> element play if a user gesture started it, and
+   "started it" means the same task — an element whose src is set after an
+   `await fetch(...)` has already lost the gesture, so the first click on a
+   speaker button downloaded the clip and then sat there paused. Once an element
+   has played once from a real gesture it stays unlocked, so the click handler
+   plays this instead: inaudible, instant, and it costs one 272-byte data URI. */
+const SILENCE =
+  'data:audio/wav;base64,UklGRsQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAAAAAA' +
+  'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+  'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+  'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+
 /** Playback speeds offered by the player, in the order the button cycles them. */
 export const DEFAULT_RATES = [1, 1.25, 1.5, 2]
 
@@ -53,10 +67,19 @@ export function ReadAloudProvider({
   storagePrefix = 'read-aloud',
   /** Seconds a skip button moves. */
   skipSeconds = 10,
+  /**
+   * How long the player stays on screen after a passage finishes, in ms.
+   *
+   * A transport bar for audio that stopped two minutes ago is clutter that the
+   * listener has to dismiss by hand, having already got what they came for.
+   * `0` keeps it up until it is closed.
+   */
+  dismissAfterMs = 4500,
 }) {
   const audioRef = useRef(null)
   const requestRef = useRef(0)
   const resumeAtRef = useRef(0)
+  const dismissTimerRef = useRef(null)
 
   const [service, setService] = useState({ available: null, voices: [], defaultVoice: initialVoice })
   const [passage, setPassage] = useState(null)
@@ -160,6 +183,17 @@ export function ReadAloudProvider({
     if (audioRef.current) audioRef.current.playbackRate = rate
   }, [rate, passage])
 
+  /* Clear the player a few seconds after the passage ends — but only from
+     'ended', so a deliberate pause halfway through never has a countdown
+     running under it. Any new status cancels the timer, which covers pressing
+     play again during those seconds. */
+  useEffect(() => {
+    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current)
+    if (status !== 'ended' || !dismissAfterMs) return undefined
+    dismissTimerRef.current = setTimeout(() => stopRef.current(), dismissAfterMs)
+    return () => clearTimeout(dismissTimerRef.current)
+  }, [status, dismissAfterMs])
+
   /** Fetches (or picks up the cached) clip and starts it. */
   const load = useCallback(
     async (next, { voice: voiceOverride, resumeAt = 0 } = {}) => {
@@ -195,6 +229,14 @@ export function ReadAloudProvider({
         await audio.play()
       } catch (err) {
         if (token !== requestRef.current) return
+        // A refused play() is not a failure to prepare: the clip is loaded and
+        // ready, the browser just wants a press. Saying "could not prepare the
+        // audio" there would be a lie about what happened, and the fix (press
+        // play) is already sitting in front of them.
+        if (err?.name === 'NotAllowedError') {
+          setStatus('paused')
+          return
+        }
         setStatus('error')
         setError(err.message || 'Could not prepare the audio.')
       }
@@ -216,6 +258,14 @@ export function ReadAloudProvider({
       const id = input.id ?? passageId(text)
       const audio = audioRef.current
 
+      // Still inside the click, so this is the moment the element can be
+      // unlocked for the programmatic play() that follows the fetch.
+      if (audio && !audio.dataset.unlocked) {
+        audio.dataset.unlocked = 'yes'
+        audio.src = SILENCE
+        void audio.play().catch(() => {})
+      }
+
       if (passage?.id === id && audio?.src) {
         if (status === 'playing') {
           audio.pause()
@@ -233,6 +283,10 @@ export function ReadAloudProvider({
 
   const pause = useCallback(() => audioRef.current?.pause(), [])
 
+  // Written after `stop` is defined; read by the auto-dismiss effect above,
+  // which must not re-run every time an unrelated callback identity changes.
+  const stopRef = useRef(() => {})
+
   const resume = useCallback(() => {
     const audio = audioRef.current
     if (!audio || !audio.src) return
@@ -247,6 +301,7 @@ export function ReadAloudProvider({
 
   /** Stops and forgets the passage — the player widget disappears with it. */
   const stop = useCallback(() => {
+    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current)
     const audio = audioRef.current
     requestRef.current += 1
     if (audio) {
@@ -298,6 +353,8 @@ export function ReadAloudProvider({
     },
     [load, passage, voiceKey],
   )
+
+  stopRef.current = stop
 
   const value = useMemo(
     () => ({

@@ -82,9 +82,21 @@ export const VOICES = IDS.map((nativeId) => {
 
 const BY_ID = new Map(VOICES.map((v) => [v.id, v]))
 
-/** The voice used when an app names none. British, unhurried, and warm — the
- *  closest thing in this model to being read to rather than announced at. */
-export const DEFAULT_VOICE = 'kokoro:bm_fable'
+/**
+ * The voice used when an app names none.
+ *
+ * Chosen by ear from a measured shortlist, not by vibes: `scripts/rank-voices.mjs`
+ * renders one sentence in every installed voice and ranks them on speaking rate,
+ * pitch variation and loudness variation, and George came out second-calmest of
+ * the 52 on the reference machine — low, steady, and unhurried. (Fable, the
+ * obvious "storyteller" pick, ranked *last*: it is the most expressive voice in
+ * the model, which is the opposite of what reading someone a difficult paragraph
+ * asks for.)
+ *
+ * If the neural engine is not installed, the service falls back to whatever the
+ * machine can actually speak rather than refusing — see `resolveVoice`.
+ */
+export const DEFAULT_VOICE = 'kokoro:bm_george'
 
 export function voiceById(id) {
   return BY_ID.get(id) ?? null
