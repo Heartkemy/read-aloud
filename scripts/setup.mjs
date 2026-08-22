@@ -60,11 +60,43 @@ if (!installed) {
   process.exit(1)
 }
 
-if (!has('espeak-ng')) {
+// `misaki[en]` depends on espeakng-loader, which ships libespeak-ng inside the
+// wheel and hands misaki the path to it — so the *binary* on PATH is irrelevant
+// and `brew install espeak-ng` is not needed. Checking `command -v espeak-ng`
+// told a working machine it was broken, which is worse than saying nothing; the
+// python package is the thing that actually has to be there.
+if (!run(PY, ['-c', 'import espeakng_loader; espeakng_loader.get_data_path()'], { stdio: 'ignore' })) {
   console.warn(
-    '\n  ! espeak-ng is missing. It is the fallback for words the phonemizer does not know;\n' +
-      '    without it, unusual names and abbreviations come out wrong.\n' +
-      '      brew install espeak-ng\n',
+    '\n  ! espeakng-loader is missing or has no data directory. It is the phonemizer\n' +
+      '    fallback for words the model does not know, and misaki needs it.\n' +
+      `      ${PY} -m pip install espeakng-loader\n`,
+  )
+}
+
+// misaki's English G2P calls `spacy.load('en_core_web_sm')` the first time it
+// phonemizes anything, and spacy's own fallback for a missing model is to shell
+// out and install it. That shell-out finds `uv` on PATH, and `uv pip install`
+// with no VIRTUAL_ENV set refuses outright — so the first synthesis dies with
+// "No virtual environment found", from a process the caller never asked to have
+// installing packages. Setup is the place to pay for this, not the first click.
+// spacy's own downloader, not a pinned wheel URL: it picks the model version
+// that matches the installed spacy. VIRTUAL_ENV is set because it delegates to
+// uv when uv is on PATH, and uv with no VIRTUAL_ENV resolves a `.venv` from the
+// *current directory* — which quietly installs the model into whatever project
+// the setup happened to be run from. The model is not on PyPI, so this is the
+// only supported way in.
+const spacyModel = run(PY, ['-m', 'spacy', 'download', 'en_core_web_sm'], {
+  env: { ...process.env, VIRTUAL_ENV: VENV },
+})
+
+if (!spacyModel) {
+  // Not fatal: the runtime install may still work if the caller happens to
+  // have a usable environment. Say so rather than failing the whole setup.
+  console.warn(
+    '\n  ! Could not pre-install spacy\'s en_core_web_sm model.\n' +
+      '    The first synthesis will try to fetch it, and will fail if the process\n' +
+      '    running it has no VIRTUAL_ENV set. Install it by hand with:\n' +
+      `      ${PY} -m spacy download en_core_web_sm\n`,
   )
 }
 

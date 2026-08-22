@@ -134,6 +134,12 @@ export function createReadAloudService({
   // passage at once — a warm-up racing a click — must not become two renders
   // writing the same file, which is both wasteful and a torn-file hazard.
   const inFlight = new Map()
+
+  // Segments waiting their turn on the serial render queue. Distinct from
+  // `inFlight` on purpose: `renderChunk` treats an entry in `inFlight` as "join
+  // this render", so a queued placeholder there would make the render await
+  // itself. Kept here instead, and consulted by `awaitClip`.
+  const queued = new Map()
   let voiceIndex = null
   let warmedUp = false
 
@@ -281,16 +287,26 @@ export function createReadAloudService({
     // awaited — and deliberately not parallel: generation is GPU-bound, so
     // asking for all of them at once makes the *second* one arrive later, which
     // is the only one whose arrival time the listener can feel.
-    const rest = parts.slice(1)
-    void rest
-      .reduce(
-        (chain, part) => chain.then(() => renderChunk({ spoken: part, voice, engine }).catch(() => {})),
-        Promise.resolve(),
-      )
-      .catch(() => {})
-
     const keyFor = (part) =>
       createHash('sha256').update(`v${CACHE_VERSION}\n${voice.id}\n${part}`).digest('hex').slice(0, 20)
+
+    // Each queued segment is registered in `queued` the moment the chain is
+    // built, not when its render starts. Segment three's URL is handed to the
+    // client immediately, and the client asks for it as soon as segment two
+    // starts playing — which is before segment three is on the engine. Without
+    // this it answers 404 and playback stops halfway through the passage.
+    const rest = parts.slice(1)
+    void rest
+      .reduce((chain, part) => {
+        const key = keyFor(part)
+        const job = chain.then(() => renderChunk({ spoken: part, voice, engine }).catch(() => {}))
+        queued.set(key, job)
+        void job.finally(() => {
+          if (queued.get(key) === job) queued.delete(key)
+        })
+        return job
+      }, Promise.resolve())
+      .catch(() => {})
 
     return {
       voice: voice.id,
@@ -375,8 +391,14 @@ export function createReadAloudService({
    *  caller (page generation, usually) must not fail because a model didn't. */
   async function warm(passages) {
     for (const passage of [].concat(passages)) {
+      const input = typeof passage === 'string' ? { text: passage } : passage
       try {
-        await synthesize(typeof passage === 'string' ? { text: passage } : passage)
+        // Honour `segment` exactly as the POST handler does. A segmented play
+        // hashes each *part* separately, so warming through `synthesize` would
+        // render one whole-passage clip under a key the player never asks for:
+        // full GPU cost, and the listener still waits. Warming has to render
+        // the same keys the play path will request.
+        await (input.segment ? synthesizeSegments(input) : synthesize(input))
       } catch (err) {
         onLog(`warm failed: ${err.message}`)
       }
@@ -390,11 +412,12 @@ export function createReadAloudService({
    * on the engine's queue, and answering 404 for "not finished yet" would make
    * the whole streaming design impossible — the URL is a content hash, so it is
    * known long before the audio exists. A request for a clip nobody is rendering
-   * still 404s immediately; this only ever waits for work already in progress.
+   * still 404s immediately; this only ever waits for work already queued or in
+   * progress.
    */
   async function awaitClip(name) {
     const key = name.replace(/\.wav$/, '')
-    const pending = inFlight.get(key)
+    const pending = inFlight.get(key) ?? queued.get(key)
     if (pending) await pending.catch(() => {})
   }
 
