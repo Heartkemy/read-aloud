@@ -32,8 +32,14 @@ const SILENCE =
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 
-/** Playback speeds offered by the player, in the order the button cycles them. */
-export const DEFAULT_RATES = [1, 1.25, 1.5, 2]
+/** Playback speeds offered by the player, in the order the button cycles them.
+ *  The slower steps are first-class, not a special case: dense text is where
+ *  the read-aloud player earns its place, and it is followed at 1× or not. */
+export const DEFAULT_RATES = [0.8, 0.9, 1, 1.25, 1.5, 2]
+
+/** The rate Calm pins as its default — slower than 1×, gentle enough to follow
+ *  a sentence the first time. */
+const CALM_RATE = 0.8
 
 /** Fallback speaking pace, in characters per second, for a segment that has not
  *  been rendered yet. Only used until the first segment reports a real duration,
@@ -135,17 +141,33 @@ export function ReadAloudProvider({
      business caring which of the two the host is. */
   const [voice, setVoiceState] = useState(initialVoice)
   const [rate, setRateState] = useState(1)
+  const [calm, setCalmState] = useState(false)
 
   const voiceKey = `${storagePrefix}:voice`
   const rateKey = `${storagePrefix}:rate`
+  const calmKey = `${storagePrefix}:calm`
 
   useEffect(() => {
     setVoiceState(readStored(voiceKey, initialVoice))
+    setCalmState(readStored(calmKey, false))
     const storedRate = readStored(rateKey, 1)
-    if (rates.includes(storedRate)) setRateState(storedRate)
+    // Calm owns the slower default: when it was on, reopen at its rate even if
+    // that rate is not in the host's list (the Calm chip makes it reachable).
+    const initial = readStored(calmKey, false) ? CALM_RATE : rates.includes(storedRate) ? storedRate : 1
+    setRateState(initial)
     // Settings are read once, on mount, per provider instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /* Calm's rate must always be reachable from the speed button. A host that
+     curates its own list (say [1, 1.25, …]) has no 0.8 in it — Calm pins it
+     anyway, and a cycle list without it makes the pinned rate unreachable:
+     indexOf returns -1 and the button jumps to the first entry. Prepending the
+     Calm rate fixes the loop without changing what the host offers otherwise. */
+  const offeredRates = useMemo(
+    () => (calm && !rates.includes(CALM_RATE) ? [CALM_RATE, ...rates] : rates),
+    [calm, rates],
+  )
 
   /* Is there a model on the other end? Asked once. Until the answer arrives
      `available` is null and the buttons render nothing at all — a speaker icon
@@ -316,6 +338,9 @@ export function ReadAloudProvider({
             text: next.text,
             intro: next.intro,
             voice: voiceOverride ?? voice,
+            // Heavier pause-widening for dense text. It is part of the cache
+            // key, so calm and normal reads of the same passage cache apart.
+            calm,
             // Ask the server to start rendering in pieces. Short passages come
             // back as a single segment anyway, so this costs nothing there.
             segment: true,
@@ -351,7 +376,7 @@ export function ReadAloudProvider({
         setError(err.message || 'Could not prepare the audio.')
       }
     },
-    [endpoint, rate, voice],
+    [endpoint, rate, voice, calm],
   )
 
   /**
@@ -497,9 +522,9 @@ export function ReadAloudProvider({
   )
 
   const cycleRate = useCallback(() => {
-    const index = rates.indexOf(rate)
-    setRate(rates[(index + 1) % rates.length])
-  }, [rate, rates, setRate])
+    const index = offeredRates.indexOf(rate)
+    setRate(offeredRates[(index + 1) % offeredRates.length])
+  }, [offeredRates, rate, setRate])
 
   /**
    * Switching voice re-renders the current passage in the new one and drops the
@@ -514,6 +539,17 @@ export function ReadAloudProvider({
     },
     [load, passage, voiceKey],
   )
+
+  /** Flips Calm. Turning it on pins the slower default; either way the current
+   *  passage is re-read from where it was so the heavier (or lighter) pauses —
+   *  which are baked into the audio, not just the player — actually land. */
+  const toggleCalm = useCallback(() => {
+    const next = !calm
+    setCalmState(next)
+    writeStored(calmKey, next)
+    if (next) setRate(CALM_RATE)
+    if (passage) void load(passage, { resumeAt: audioRef.current?.currentTime ?? 0 })
+  }, [calm, calmKey, load, passage, setRate])
 
   stopRef.current = stop
 
@@ -536,7 +572,8 @@ export function ReadAloudProvider({
       segmentIndex,
       voice,
       rate,
-      rates,
+      rates: offeredRates,
+      calm,
       skipSeconds,
       speak,
       toggle,
@@ -548,6 +585,7 @@ export function ReadAloudProvider({
       setRate,
       cycleRate,
       setVoice,
+      toggleCalm,
     }),
     [
       service,
@@ -564,7 +602,8 @@ export function ReadAloudProvider({
       segmentIndex,
       voice,
       rate,
-      rates,
+      offeredRates,
+      calm,
       skipSeconds,
       speak,
       toggle,
@@ -576,6 +615,7 @@ export function ReadAloudProvider({
       setRate,
       cycleRate,
       setVoice,
+      toggleCalm,
     ],
   )
 

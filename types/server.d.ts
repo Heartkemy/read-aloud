@@ -41,6 +41,11 @@ export interface SynthesizeInput {
   intro?: string
   /** Engine-qualified voice id. Falls back to the service default. */
   voice?: string
+  /** Heavier pause-widening (CALM_PAUSE) for dense, information-heavy text.
+   *  Part of the cache key, so calm and normal reads cache separately. */
+  calm?: boolean
+  /** Exact seconds of pause-widening, overriding `calm`. Part of the cache key. */
+  breathe?: number
 }
 
 /** One engine — implement this to add Piper, espeak-ng, or a cloud provider. */
@@ -50,7 +55,14 @@ export interface Engine {
   available(): boolean
   unavailableReason?(): string | null
   voices(): Voice[] | Promise<Voice[]>
-  render(input: { text: string; out: string; voice: string; speed?: number }): Promise<unknown>
+  render(input: {
+    text: string
+    out: string
+    voice: string
+    speed?: number
+    /** Seconds of pause-widening. Ignored by engines that can't widen pauses. */
+    pause?: number
+  }): Promise<unknown>
   stop?(): void
   readonly warm?: boolean
 }
@@ -78,6 +90,10 @@ export interface ReadAloudOptions {
   pythonPath?: string
   scriptPath?: string
   model?: string
+  /** Pause-widening applied to a normal read. Default 0.25 (see python/breathe.py). */
+  defaultPause?: number
+  /** Pause-widening applied when a request sets `calm: true`. Default 0.6. */
+  calmPause?: number
   /** Replace the engine list entirely. */
   engines?: Engine[]
   onLog?: (message: string) => void
@@ -105,6 +121,8 @@ export function createReadAloudService(options?: ReadAloudOptions): ReadAloudSer
 export function wavSeconds(filePath: string): number
 
 export const CACHE_VERSION: number
+export const DEFAULT_PAUSE: number
+export const CALM_PAUSE: number
 
 export function createKokoroEngine(options?: ReadAloudOptions & { languages?: string[] | null }): Engine
 export function createSayEngine(options?: { languages?: string[] | null; includeNovelty?: boolean }): Engine

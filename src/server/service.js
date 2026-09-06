@@ -25,8 +25,17 @@ import { createNormalizer } from './normalizer.js'
 
 /** Bumped only for changes in how a clip is *rendered* that the cache key can't
  *  see by itself. Normalizer changes need no bump: the key is computed from the
- *  normalized text, so better normalization is automatically a new key. */
-export const CACHE_VERSION = 2
+ *  normalized text, so better normalization is automatically a new key. The
+ *  pause widening is in the key, but the *algorithm* is not — bump whenever
+ *  `python/breathe.py` changes how a pause is widened, or cached clips keep
+ *  the old sound. */
+export const CACHE_VERSION = 4
+
+// Seconds of pause-widening applied to every rendered clip. Mirrors
+// python/breathe.py — keep the two in step. `calm: true` on a request asks for
+// the heavier CALM_PAUSE; an explicit `breathe` (seconds) wins over both.
+export const DEFAULT_PAUSE = 0.25
+export const CALM_PAUSE = 0.6
 
 function defaultCacheDir() {
   if (fs.existsSync(path.join(process.cwd(), 'node_modules'))) {
@@ -117,6 +126,8 @@ export function createReadAloudService({
   scriptPath,
   model,
   engines,
+  defaultPause = DEFAULT_PAUSE,
+  calmPause = CALM_PAUSE,
   /** Start loading the model as soon as a page asks for the voice list, rather
    *  than on the first click. See `info()`. */
   warmOnLoad = true,
@@ -191,13 +202,30 @@ export function createReadAloudService({
     }
   }
 
-  /** Renders one already-normalized chunk of speech. Everything below goes
-   *  through here, so the cache key is computed in exactly one place. */
-  async function renderChunk({ spoken, voice, engine }) {
-    const key = createHash('sha256')
-      .update(`v${CACHE_VERSION}\n${voice.id}\n${spoken}`)
+  /** Seconds of pause-widening for one request. `breathe` (explicit seconds)
+   *  wins, then `calm`, then the service default — which is never zero, so a
+   *  passage that asked for nothing still gets the gentle breath. */
+  function pauseFor(input) {
+    if (typeof input?.breathe === 'number' && Number.isFinite(input.breathe)) {
+      return Math.max(0, input.breathe)
+    }
+    return input?.calm ? calmPause : defaultPause
+  }
+
+  /** The content address for one spoken chunk: voice, pause and text. A calm
+   *  read and a normal read of the same passage are different bytes, so they
+   *  are different keys. */
+  function clipKey({ voice, spoken, pause }) {
+    return createHash('sha256')
+      .update(`v${CACHE_VERSION}\n${voice.id}\np${pause}\n${spoken}`)
       .digest('hex')
       .slice(0, 20)
+  }
+
+  /** Renders one already-normalized chunk of speech. Everything below goes
+   *  through here, so the cache key is computed in exactly one place. */
+  async function renderChunk({ spoken, voice, engine, pause }) {
+    const key = clipKey({ voice, spoken, pause })
     const file = path.join(cacheDir, `${key}.wav`)
     const url = `${basePath}/clip/${key}.wav`
 
@@ -212,7 +240,7 @@ export function createReadAloudService({
     if (existing) return existing
 
     const job = engine
-      .render({ text: spoken, out: file, voice: voice.id })
+      .render({ text: spoken, out: file, voice: voice.id, pause })
       .then((result) => {
         if (!fs.existsSync(file)) throw new Error('Synthesis produced no audio.')
         evictOldClips()
@@ -231,7 +259,7 @@ export function createReadAloudService({
   }
 
   /** Prepares a request: resolves the voice and engine, normalizes the text. */
-  async function prepare({ text, intro, voice: requestedVoice }) {
+  async function prepare({ text, intro, voice: requestedVoice, ...rest }) {
     const body = String(text ?? '').trim()
     if (!body) throw new Error('Nothing to speak.')
     if (body.length > maxTextLength) {
@@ -252,7 +280,7 @@ export function createReadAloudService({
       // "asterisk". Audible, so it does not pass silently.
       onLog(`markdown leaked into speech: ${leaks.join(' ')}`)
     }
-    return { spoken, voice, engine }
+    return { spoken, voice, engine, pause: pauseFor(rest) }
   }
 
   /**
@@ -270,10 +298,10 @@ export function createReadAloudService({
    * they have been rendered.
    */
   async function synthesizeSegments(input) {
-    const { spoken, voice, engine } = await prepare(input)
+    const { spoken, voice, engine, pause } = await prepare(input)
     const parts = segmentText(spoken, input.segmentation)
     if (parts.length <= 1) {
-      const clip = await renderChunk({ spoken, voice, engine })
+      const clip = await renderChunk({ spoken, voice, engine, pause })
       return {
         segments: [{ url: clip.url, seconds: clip.seconds, chars: spoken.length }],
         voice: voice.id,
@@ -281,14 +309,13 @@ export function createReadAloudService({
       }
     }
 
-    const first = await renderChunk({ spoken: parts[0], voice, engine })
+    const first = await renderChunk({ spoken: parts[0], voice, engine, pause })
 
     // The rest, in order, on the same serial engine queue. Deliberately not
     // awaited — and deliberately not parallel: generation is GPU-bound, so
     // asking for all of them at once makes the *second* one arrive later, which
     // is the only one whose arrival time the listener can feel.
-    const keyFor = (part) =>
-      createHash('sha256').update(`v${CACHE_VERSION}\n${voice.id}\n${part}`).digest('hex').slice(0, 20)
+    const keyFor = (part) => clipKey({ voice, spoken: part, pause })
 
     // Each queued segment is registered in `queued` the moment the chain is
     // built, not when its render starts. Segment three's URL is handed to the
@@ -299,7 +326,8 @@ export function createReadAloudService({
     void rest
       .reduce((chain, part) => {
         const key = keyFor(part)
-        const job = chain.then(() => renderChunk({ spoken: part, voice, engine }).catch(() => {}))
+        const job = chain
+          .then(() => renderChunk({ spoken: part, voice, engine, pause }).catch(() => {}))
         queued.set(key, job)
         void job.finally(() => {
           if (queued.get(key) === job) queued.delete(key)
@@ -330,8 +358,8 @@ export function createReadAloudService({
    * Resolves `{ url, seconds, voice, cached }`.
    */
   async function synthesize(input) {
-    const { spoken, voice, engine } = await prepare(input)
-    const clip = await renderChunk({ spoken, voice, engine })
+    const { spoken, voice, engine, pause } = await prepare(input)
+    const clip = await renderChunk({ spoken, voice, engine, pause })
     return { url: clip.url, seconds: clip.seconds, voice: clip.voice, cached: clip.cached }
   }
 

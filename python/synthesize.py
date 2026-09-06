@@ -20,7 +20,11 @@ Two modes:
 
 Request (serve mode), one JSON object per line:
     {"id": "abc", "text": "...", "out": "/abs/path.wav",
-     "voice": "bm_fable", "speed": 1.0, "normalize": true, "read_code": false}
+     "voice": "bm_fable", "speed": 1.0, "normalize": true, "read_code": false,
+     "calm": false, "breathe": 0.25}
+    `calm` widens pauses to CALM_PAUSE (0.6 s); `breathe` sets the seconds
+    exactly and wins over `calm`. Neither is required — the gentle default
+    (DEFAULT_PAUSE, 0.25 s) applies to every read.
 
 Response, one JSON object per line:
     {"id": "abc", "ok": true, "seconds": 4.12, "voice": "bm_fable", "leaks": []}
@@ -54,6 +58,7 @@ from mlx_audio.tts.generate import generate_audio  # noqa: E402
 from mlx_audio.tts.utils import load_model  # noqa: E402
 
 from normalize import leaked_syntax, normalize  # noqa: E402
+from breathe import CALM_PAUSE, DEFAULT_PAUSE, breathe  # noqa: E402
 
 DEFAULT_MODEL = "prince-canuma/Kokoro-82M"
 DEFAULT_VOICE = "bm_fable"
@@ -98,8 +103,17 @@ def available_voices(model) -> list[str]:
     return []
 
 
+def pause_extra(*, calm: bool = False, breathe_seconds: float | None = None) -> float:
+    """Seconds of pause-widening for a request. An explicit `breathe` overrides
+    the named modes; otherwise Calm asks for more than the gentle default."""
+    if breathe_seconds is not None:
+        return max(0.0, float(breathe_seconds))
+    return CALM_PAUSE if calm else DEFAULT_PAUSE
+
+
 def synthesize(model, *, text: str, out: str, voice: str, speed: float,
-               do_normalize: bool, read_code: bool) -> dict:
+               do_normalize: bool, read_code: bool,
+               calm: bool = False, breathe_seconds: float | None = None) -> dict:
     """Render one passage to `out`. Returns the JSON-able result body."""
     raw = (text or "").strip()
     if not raw:
@@ -135,6 +149,12 @@ def synthesize(model, *, text: str, out: str, voice: str, speed: float,
     produced = os.path.join(out_dir, f"{prefix}.wav")
     if not os.path.exists(produced):
         return {"ok": False, "error": "synthesis produced no file"}
+
+    # Breathing room: widen the natural pauses already in the audio. Every read
+    # gets a gentle gap so dense text is followable; Calm asks for more.
+    extra = pause_extra(calm=calm, breathe_seconds=breathe_seconds)
+    if extra:
+        breathe(produced, extra)
 
     return {
         "ok": True,
@@ -179,6 +199,8 @@ def serve(model_path: str) -> int:
                 speed=float(req.get("speed", 1.0)),
                 do_normalize=bool(req.get("normalize", True)),
                 read_code=bool(req.get("read_code", False)),
+                calm=bool(req.get("calm", False)),
+                breathe_seconds=req.get("breathe"),
             )
         except KeyError as err:
             body = {"ok": False, "error": f"missing field {err}"}
@@ -207,6 +229,17 @@ def main() -> int:
         action="store_true",
         help="speak fenced code contents instead of announcing them",
     )
+    parser.add_argument(
+        "--calm",
+        action="store_true",
+        help="widen pauses to CALM_PAUSE instead of the gentle default",
+    )
+    parser.add_argument(
+        "--breathe",
+        type=float,
+        default=None,
+        help="extra seconds of pause per sentence break (overrides --calm)",
+    )
     args = parser.parse_args()
 
     if args.serve:
@@ -226,6 +259,8 @@ def main() -> int:
         speed=args.speed,
         do_normalize=not args.no_normalize,
         read_code=args.read_code,
+        calm=args.calm,
+        breathe_seconds=args.breathe,
     )
     emit(result)
     return 0 if result.get("ok") else 1

@@ -172,9 +172,10 @@ export function createSynthesizer({
 
   /**
    * Renders one passage to `out`, starting or reusing the warm process.
-   * Resolves `{ seconds, voice, leaks }`.
+   * Resolves `{ seconds, voice, leaks }`. `pause` (seconds) is the breathing
+   * the python side adds after each natural silence; see `python/breathe.py`.
    */
-  async function render({ text, out, voice, speed = 1 }) {
+  async function render({ text, out, voice, speed = 1, pause }) {
     await start()
     if (idleTimer) clearTimeout(idleTimer)
 
@@ -182,7 +183,7 @@ export function createSynthesizer({
     // `normalize: false` always: markdown became spoken prose upstream, in the
     // one normalizer every engine shares. Two copies of that logic is exactly
     // the drift this library exists to remove.
-    const request = { id, text, out, voice, speed, normalize: false }
+    const request = { id, text, out, voice, speed, normalize: false, breathe: pause }
 
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject })
@@ -258,8 +259,8 @@ export function createKokoroEngine({ languages = ['en'], ...options } = {}) {
     warmUp: synth.warmUp,
     touch: synth.touch,
     voices: () => voicesForLanguages(languages),
-    render: ({ text, out, voice, speed }) =>
-      synth.render({ text, out, voice: parseVoiceId(voice).nativeId, speed }),
+    render: ({ text, out, voice, speed, pause }) =>
+      synth.render({ text, out, voice: parseVoiceId(voice).nativeId, speed, pause }),
     stop: synth.stop,
     get warm() {
       return synth.warm

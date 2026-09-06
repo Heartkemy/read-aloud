@@ -92,12 +92,14 @@ function ProgressRing({ progress, status, variant = 'mini' }) {
  * @param {'end'|'center'|'start'} [props.align] Which side `fixed` docks to.
  * @param {boolean} [props.voicePicker] Show the voice `<select>`.
  * @param {boolean} [props.speedControl] Show the playback-speed button.
+ * @param {boolean} [props.calmControl] Show the Calm toggle.
  */
 export function ReadAloudPlayer({
   placement = 'fixed',
   align = 'end',
   voicePicker = true,
   speedControl = true,
+  calmControl = true,
   className = '',
 }) {
   const speech = useReadAloud()
@@ -141,7 +143,7 @@ export function ReadAloudPlayer({
 
   if (!speech || !speech.passage) return null
 
-  const { status, time, duration, error, skipSeconds, rate, voice, estimated } = speech
+  const { status, time, duration, error, skipSeconds, rate, voice, calm, estimated } = speech
   const preparing = status === 'preparing'
   const playing = status === 'playing'
   const progress = duration > 0 ? Math.min(1, time / duration) : 0
@@ -287,12 +289,25 @@ export function ReadAloudPlayer({
             {speedControl && (
               <button
                 type="button"
-                className="ra-player__chip"
+                className="ra-player__chip ra-player__rate"
                 onClick={speech.cycleRate}
                 aria-label={`Speed ${rate} times. Click to change.`}
                 title="Playback speed"
               >
                 {rate}× speed
+              </button>
+            )}
+
+            {calmControl && (
+              <button
+                type="button"
+                className="ra-player__chip ra-player__calm"
+                onClick={speech.toggleCalm}
+                aria-pressed={calm}
+                aria-label={`Calm reading${calm ? ', on' : ', off'}. Click to toggle.`}
+                title="Calm — slower default speed and longer pauses between sentences, for dense text"
+              >
+                Calm
               </button>
             )}
 

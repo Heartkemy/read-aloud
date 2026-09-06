@@ -61,6 +61,9 @@ export interface ReadAloudState {
   voice: string
   rate: number
   rates: number[]
+  /** Calm reading: slower default rate and heavier pauses between sentences.
+   *  Turning it on re-reads the current passage so the pauses land. */
+  calm: boolean
   skipSeconds: number
   speak(input: { id?: string; text: PassageInput; title?: string; intro?: string }): void
   toggle(): void
@@ -72,6 +75,7 @@ export interface ReadAloudState {
   setRate(rate: number): void
   cycleRate(): void
   setVoice(voiceId: string): void
+  toggleCalm(): void
 }
 
 export type PassageInput = string | number | null | undefined | false | PassageInput[]
@@ -110,6 +114,7 @@ export interface ReadAloudPlayerProps {
   placement?: 'fixed' | 'inline'
   voicePicker?: boolean
   speedControl?: boolean
+  calmControl?: boolean
   className?: string
 }
 
