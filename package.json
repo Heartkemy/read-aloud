@@ -1,0 +1,101 @@
+{
+  "name": "@athanor-code/read-aloud",
+  "version": "0.1.0",
+  "description": "Local, private read-aloud for React apps: a speaker button on every passage, one shared player, and a neural voice that never leaves the machine.",
+  "keywords": [
+    "text-to-speech",
+    "tts",
+    "read-aloud",
+    "accessibility",
+    "react",
+    "kokoro",
+    "mlx",
+    "local-first",
+    "offline",
+    "vite",
+    "express"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Heartkemy/read-aloud.git"
+  },
+  "homepage": "https://github.com/Heartkemy/read-aloud#readme",
+  "bugs": "https://github.com/Heartkemy/read-aloud/issues",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./style.css": "./src/style.css",
+    "./voices": {
+      "types": "./types/voices.d.ts",
+      "default": "./src/voices.js"
+    },
+    "./text": {
+      "types": "./types/text.d.ts",
+      "default": "./src/text.js"
+    },
+    "./server": {
+      "types": "./types/server.d.ts",
+      "default": "./src/server/index.js"
+    },
+    "./vite": {
+      "types": "./types/vite.d.ts",
+      "default": "./src/server/vite.js"
+    },
+    "./express": {
+      "types": "./types/express.d.ts",
+      "default": "./src/server/express.js"
+    },
+    "./package.json": "./package.json",
+    "./fetch": {
+      "types": "./types/fetch.d.ts",
+      "default": "./src/server/fetch.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "python/breathe.py",
+    "python/normalize.py",
+    "python/normalize_cli.py",
+    "python/rank_voices.py",
+    "python/requirements-neural.txt",
+    "python/synthesize.py",
+    "scripts",
+    "types",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "bin": {
+    "read-aloud-setup": "./scripts/setup.mjs"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepare": "node scripts/build.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:python": "uv run --no-project --with pytest --python 3.12 python -m pytest python/test_normalize.py python/test_breathe.py -q",
+    "rank-voices": "node scripts/rank-voices.mjs"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "react": "^18.3.1",
+    "vitest": "^4.1.12"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

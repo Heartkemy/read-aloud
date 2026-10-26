@@ -1,0 +1,6 @@
+# Tested on macOS Apple Silicon with Python 3.12.14 on 2026-10-26.
+# This pins the supported top-level runtime set; do not upgrade it implicitly
+# in a shared environment. Recreate an isolated venv to test a future update.
+mlx-audio==0.5.3
+misaki[en]==0.9.4
+spacy==3.8.16
